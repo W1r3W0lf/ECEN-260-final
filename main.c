@@ -1,11 +1,10 @@
 #include "msp.h"
-//#include "time.h"
 #include "stdlib.h"
+//#include "time.h"
 
+enum mode {MAIN, REMOTE};
 
-enum mode {MASTER, SLAVE};
-
-#define board_mode MASTER;
+#define board_mode MAIN;
 
 #define LED BIT0
 #define LED2RED BIT0
@@ -15,6 +14,7 @@ enum mode {MASTER, SLAVE};
 
 // The states that the game could be in
 enum state {start_mode, game_mode, fail_mode};
+// I am thinking of making this look like a FSM.
 
 #define game_mode start;
 
@@ -41,7 +41,6 @@ void main(void)
 {
 	WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;		// stop watchdog timer
 
-
 	// Setup the red LED.
 	P1->DIR |= LED; // Set LED as output.
 	P1->OUT &= ~LED; // Turn off LED
@@ -49,6 +48,7 @@ void main(void)
 	P2->DIR |= (LED2RED|LED2GREEN|LED2BLUE);
 	P2->OUT &= ~(LED2RED|LED2GREEN|LED2BLUE);
 
+	// Testing out rand
 	while(1)
 	{
 	    if (rand() %17 == 0)
@@ -63,6 +63,7 @@ void main(void)
 	}
 
 }
+
 
 void game()
 {
