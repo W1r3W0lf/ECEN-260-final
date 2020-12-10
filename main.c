@@ -1,6 +1,7 @@
 #include "msp.h"
 #include "stdlib.h"
 //#include "time.h"
+#include "colors.h"
 
 enum mode {MAIN, REMOTE};
 
@@ -8,26 +9,18 @@ enum mode {MAIN, REMOTE};
 // massages from remote to main
 enum remote_messages {BUTTON2, BUTTON3};
 
-// color is a char where the first 3 bits are red green and blue.
-typedef int color;
-
 #define board_mode MAIN
 
 #define LED BIT0
 
-enum colors {
-    RED = BIT0,
-    GREEN = BIT1,
-    BLUE = BIT2,
-    YELLOW = (BIT0 | BIT1),
-    CYAN = (BIT1 | BIT2),
-    MEGANTA = ( BIT0 |  BIT2),
-    WHITE = ( BIT0 |  BIT1 |  BIT2),
-    BLACK = 0
-};
+#define BUTTON1 BIT1
+#define BUTTON2 BIT4
 
+#define PRESSED1 0x88
+#define RELEASED1 0x99
 
-
+#define PRESSED2 0xAA
+#define RELEASED2 0xBB
 
 // The states that the game could be in
 enum state {start_mode, game_mode, fail_mode};
@@ -52,6 +45,18 @@ void sleep(unsigned int sec){
         }
     }
 }
+
+
+void UART_OutChar (char data) {
+    while ( (EUSCI_A2->IFG & BIT1) == 0);  // Busy.  Wait for previous output.
+    EUSCI_A2->TXBUF = data;        // Start transmission when IFG = 1.
+}
+
+char UART_InChar (void) {
+    while ( (EUSCI_A2->IFG & BIT0) == 0);  // Busy.  Wait for received data.
+    return ( (char) (EUSCI_A2->RXBUF) );   // Get new input when IFG = 1.
+}
+
 
 void setup()
 {
@@ -78,6 +83,23 @@ void setup()
         P1->IFG &= ~BIT4;     // clear the interrupt flag for pin P1.1
         P1->IE |= BIT4;       // enable the interrupt for pin P1.1
 
+        // Setup bord communiation settings
+        // Setup Input/Output pins.
+		P3->SEL0 |= BIT2 | BIT3;    // Set bit 2 and bit 3 of P3SEL0 to 1
+		P3->SEL1 &= ~(BIT2 | BIT3);     // Reset bit 2 and bit 3 of P3SEL1 to 0
+
+		EUSCI_A2->CTLW0 |= BIT0;        // Set WRST to put UART0 in reset
+										// Leave all other bits = 0
+		EUSCI_A2->CTLW0 |= BIT6 | BIT7; // Use SMCLK
+
+		// Store the BRW in UCA2BRW to set the baud rate at 9600.
+		// 3M/9600 = 312.5 -> 313 -> 0x139
+		EUSCI_A2->BRW= 0x139;        // Baud rate = 9600
+
+		EUSCI_A2->MCTLW &= ~BIT0;       // UCOS16 bit = 0
+
+		EUSCI_A2->CTLW0 &= ~ BIT0;  // Clear WRST to resume UART operation.
+
 }
 
 
@@ -86,45 +108,72 @@ void setup()
  */
 void main(void)
 {
+
 	setup();
 
 	if (board_mode == MAIN)
-	{
 	    game();
-	}
 	else
-	{
 	    helper();
-	}
 
 
 }
 
 
-color random_color()
+int game_inputs()
 {
-    color new_color;
-    new_color = 0; // Zero out the new color
-
-    // make the random colors.
-    new_color = (RED | GREEN | BLUE) & rand();
-
-    return new_color;
+    // Get local Inputs
+    return 0;
 }
 
 
-void show_color(color display_color)
+void send_color(color remote_color)
 {
-    P2->OUT &= ~WHITE;   // Clear last COLOR
-    P2->OUT |= display_color; // Update the RGB LED
+    UART_OutChar((char)remote_color);
+}
+
+
+color get_color()
+{
+    return (color)UART_InChar();
 }
 
 
 void game()
 {
     int points = 0;
-    color current_color;
-    int inputs = 0;
+    color current_color = 0;
+    char inputs = 0;
+
+    while(1)
+    {
+
+        switch(UART_InChar())
+        {
+        case PRESSED1:
+            current_color &= ~RED;
+            break;
+        case RELEASED1:
+            current_color |= RED;
+            break;
+        case PRESSED2:
+            current_color &= ~GREEN;
+            break;
+        case RELEASED2:
+            current_color |= GREEN;
+        }
+
+        if (P1->IN & BUTTON1)
+            current_color &= ~BLUE;
+        else
+            current_color |= BLUE;
+
+        UART_OutChar((char)current_color);
+
+        show_color(current_color);
+
+    }
+
     while(points < 10)
     {
         // Make new color to be displayed
@@ -143,6 +192,30 @@ void game()
 
         }
 
+    }
+}
+
+
+void helper()
+{
+    while(1)
+    {
+        if (P1->IN & BUTTON1)
+            UART_OutChar(PRESSED1);
+        else
+            UART_OutChar(RELEASED1);
+
+        if (P1->IN & BUTTON2)
+            UART_OutChar(PRESSED2);
+        else
+            UART_OutChar(RELEASED2);
+
+        show_color((color)UART_InChar());
+
+        switch(0)
+        {
+
+        }
     }
 }
 
