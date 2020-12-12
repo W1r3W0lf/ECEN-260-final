@@ -16,21 +16,17 @@ enum remote_messages {BUTTON2, BUTTON3};
 #define BUTTON1 BIT1
 #define BUTTON2 BIT4
 
-#define PRESSED1 0x88
-#define RELEASED1 0x99
+#define PRESSED1 0xA0
+#define RELEASED1 0xF0
 
-#define PRESSED2 0xAA
-#define RELEASED2 0xBB
+#define PRESSED2 0x0A
+#define RELEASED2 0x0F
 
-// The states that the game could be in
-enum state {start_mode, game_mode, fail_mode};
-// I am thinking of making this look like a FSM.
 
 int points = 0;
 
 #define game_mode start
 
-void restart();
 void game();
 void helper();
 
@@ -38,10 +34,10 @@ void helper();
 void sleep(unsigned int sec){
 	while(sec-- > 0)
 	{
-		int tick = 2; // 7 is about 1 second.
+		int tick = 2;
 		while(tick-- > 0)
 		{
-			unsigned int delay = 65535;
+			unsigned int delay = 20000;
 			while(delay-- > 0);
 		}
 	}
@@ -72,18 +68,25 @@ void setup()
 	P2->OUT &= ~(RED | GREEN | BLUE);
 
 	// Setup button 0
+	// BLUE for MAIN and RED for REMOTE
 	P1->DIR &= ~BIT1;     // set up pin P1.1 as input
 	P1->REN |= BIT1;      // connect pull resistor to pin P1.1
 	P1->OUT |= BIT1;      // configure pull resistor as pull up
-	P1->IFG &= ~BIT1;     // clear the interrupt flag for pin P1.1
-	P1->IE |= BIT1;       // enable the interrupt for pin P1.1
 
 	// Setup button 1
-	P1->DIR &= ~BIT4;     // set up pin P1.1 as input
-	P1->REN |= BIT4;      // connect pull resistor to pin P1.1
+	// RESET for MAIN and GREEN for REMTOE
+	P1->DIR &= ~BIT4;     // set up pin P1.4 as input
+	P1->REN |= BIT4;      // connect pull resistor to pin P1.4
 	P1->OUT |= BIT4;      // configure pull resistor as pull up
-	P1->IFG &= ~BIT4;     // clear the interrupt flag for pin P1.1
-	P1->IE |= BIT4;       // enable the interrupt for pin P1.1
+	P1->IFG &= ~BIT4;     // clear the interrupt flag for pin P1.4
+	P1->IE |= BIT4;       // enable the interrupt for pin P1.4
+
+	// Set up the reset interupt.
+	if (board_mode == MAIN)
+	{
+	    NVIC->ISER[1] |= 0x08;
+	    _enable_interrupts();
+	}
 
 	// Setup bord communiation settings
 	// Setup Input/Output pins.
@@ -123,13 +126,23 @@ void main(void)
 
 void fail_blink()
 {
-
+    int i;
+    for (i=0; i< 10; i++)
+    {
+        P1->OUT ^= LED;
+        sleep(1);
+    }
 }
 
 
-void pass_blink()
+void pass_blink(color passed)
 {
-
+    int i;
+    for (i=0 ; i < 10 ; i++)
+    {
+        P2->OUT ^= passed;
+        sleep(1);
+    }
 }
 
 
@@ -142,20 +155,20 @@ void send_color(color remote_color)
 color get_color()
 {
 	color new_color = 0;
-	switch(UART_InChar())
-	{
-		case PRESSED1:
-			new_color &= ~RED;
-			break;
-		case RELEASED1:
-			new_color |= RED;
-			break;
-		case PRESSED2:
-			new_color &= ~GREEN;
-			break;
-		case RELEASED2:
-			new_color |= GREEN;
-	}
+
+	char message = UART_InChar();
+	char partA = 0xF0 & message;
+	char partB = 0x0F & message;
+
+	if (partA == PRESSED1)
+	    new_color &= ~RED;
+	else
+	    new_color |= RED;
+
+	if (partB == PRESSED2)
+	    new_color &= ~GREEN;
+	else
+	    new_color |= GREEN;
 
 	if (P1->IN & BUTTON1)
 		new_color &= ~BLUE;
@@ -173,10 +186,20 @@ void game()
 	color input_color = BLACK;
 	int ticks;
 
+	show_color(RED);
+	sleep(3);
+	show_color(GREEN);
+	sleep(3);
+	show_color(BLUE);
+	sleep(3);
+	show_color(BLACK);
+
+
+
 	while(1)
 	{
 	    // Win condition
-		while (points >= 10)
+		while (points >= 15)
 		{
 			show_color(random_color());
 			UART_OutChar((char)random_color());
@@ -186,23 +209,30 @@ void game()
 		// Make a new color
 		current_color = random_color();
 
-		UART_OutChar((char)current_color); // This could break communications. If so put in loop.
 
-		for (ticks = 0 ; ticks < 1000 ; ticks++)
+
+		for (ticks = 0 ; ticks < 15 ; ticks++)
 		{
 		    input_color = get_color();
 
+		    UART_OutChar((char)current_color); // This could break communications. If so put in loop.
+
 
 		    show_color(input_color);
+		    if (input_color == current_color)
+		        break;
+		    sleep(1);
 		}
 
-		if (! (input_color ^ current_color))
+		if (input_color == current_color)
 		{
 		    points++;
+		    pass_blink(input_color);
 		}
 		else
 		{
 		    points--;
+		    fail_blink();
 		}
 
 	}
@@ -213,15 +243,19 @@ void helper()
 {
 	while(1)
 	{
-		if (P1->IN & BUTTON1)
-			UART_OutChar(PRESSED1);
-		else
-			UART_OutChar(RELEASED1);
+	    char message = 0;
 
-		if (P1->IN & BUTTON2)
-			UART_OutChar(PRESSED2);
-		else
-			UART_OutChar(RELEASED2);
+	    if (P1->IN & BUTTON1)
+	        message |= PRESSED1;
+	    else
+	        message |= RELEASED1;
+
+	    if (P1->IN & BUTTON2)
+	        message |= PRESSED2;
+	    else
+	        message |= RELEASED2;
+
+	    UART_OutChar(message);
 
 		show_color((color)UART_InChar());
 
@@ -229,7 +263,20 @@ void helper()
 }
 
 
-void restart()
-{
+/***
+* IRQ handler for port 1
+***/
+void PORT1_IRQHandler(void){
 
+  uint32_t status;
+
+  status = P1->IFG;    /* get the interrupt status for port 1 */
+  P1->IFG &= ~BIT4;    /* clear the interrupt for port 1, pin 1 */
+
+  if(status & BIT4){   /* constant for the pin 1 mask */
+      points = 0;
+      sleep(1);
+      fail_blink();
+
+  }
 }
