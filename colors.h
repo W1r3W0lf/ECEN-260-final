@@ -13,7 +13,7 @@
 // color is a char where the first 3 bits are red green and blue.
 typedef int color;
 
-
+// list of colors
 enum colors {
     RED = BIT0,
     GREEN = BIT1,
@@ -25,13 +25,13 @@ enum colors {
     BLACK = 0
 };
 
-
+// Return a random color
 color random_color()
 {
     return WHITE & rand();
 }
 
-
+// Display a color on the RGB LED
 void show_color(color display_color)
 {
     P2->OUT &= BLACK; // Clear last COLOR
